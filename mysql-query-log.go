@@ -7,6 +7,8 @@ import (
 	"github.com/miekg/pcap"
 	"os"
 	"regexp"
+	"sort"
+	"time"
 )
 
 var (
@@ -26,14 +28,73 @@ func init() {
 	flag.Parse()
 }
 
+func report() {
+	for {
+		time.Sleep(3 * time.Second)
+
+		keys := make([]string, len(qCount))
+		i := 0
+		sum := 0
+		for k, c := range qCount {
+			keys[i] = k
+			i++
+			sum += c
+		}
+		sort.Sort(sort.Reverse(ByCount(keys)))
+
+		fmt.Printf("* %d unique, %d total\n", len(qCount), sum)
+continue
+		i = 0
+		for _, q := range keys {
+			if i < 3 {
+				c := qCount[q]
+
+				if len(q) > 80 {
+					q = q[:80] + "..."
+				}
+
+				fmt.Printf("[%d] %-80s\n", c, q)
+			}
+
+			i++
+		}
+
+		fmt.Printf("\n")
+	}
+}
+
+// Create statistics of all incomingQueries
+func process(in <-chan string) {
+	var q string
+
+	// replace variables
+	var queryVariables = []*regexp.Regexp{
+		regexp.MustCompile("[0-9]+"),
+		regexp.MustCompile(`'[^']*'`),
+		regexp.MustCompile(`"[^"]*"`),
+	}
+
+	for {
+		q = <-in
+
+		for _, r := range queryVariables {
+			q = r.ReplaceAllString(q, "?")
+		}
+
+		qCount[q]++
+	}
+}
+
 // Listen on listenInterface, process queries and send to incomingQuery
-func main() {
+func listen() <-chan string {
+	out := make(chan string, 256)
+
 	c, err := pcap.OpenLive(listenInterface, 65535, true, 500)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "while opening %s: %s", listenInterface, err)
 		os.Exit(1)
 	}
-	defer c.Close()
+//	defer c.Close()
 
 	if err := c.SetFilter("tcp dst port 3306"); err != nil {
 		fmt.Fprintf(os.Stderr, "while setting filter: %s", err)
@@ -42,7 +103,7 @@ func main() {
 
 	fmt.Fprintf(os.Stderr, "ready\n")
 
-	func() {
+	go func() {
 		var data []byte
 		rNormalize := regexp.MustCompile("\\s+")
 
@@ -76,9 +137,24 @@ func main() {
 				}
 
 fmt.Printf("[%s] %s\n", pkt.Time.Format("15:04:05.000"), q)
+				out <- q
 			}
 		}
+
+		close(out)
 	}()
+
+	return out
+}
+
+func main() {
+	incomingQuery := listen()
+
+	go report()
+	go process(incomingQuery)
+
+	for {
+	}
 }
 
 func packetGetPayload(pkt *pcap.Packet) []byte {
