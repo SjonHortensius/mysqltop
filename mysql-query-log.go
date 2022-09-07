@@ -5,23 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"github.com/miekg/pcap"
-	"os"
+	"github.com/percona/go-mysql/query"
 	"regexp"
 )
 
 var (
 	listenInterface string
-	qCount          = map[string]int{}
 )
 
-type ByCount []string
-
-func (q ByCount) Len() int           { return len(qCount) }
-func (q ByCount) Swap(i, j int)      { q[i], q[j] = q[j], q[i] }
-func (q ByCount) Less(i, j int) bool { return qCount[q[i]] < qCount[q[j]] }
-
 func init() {
-	flag.StringVar(&listenInterface, "interface", "eth0", "interface to listen on")
+	flag.StringVar(&listenInterface, "i", "eth0", "interface to listen on")
 
 	flag.Parse()
 }
@@ -30,17 +23,13 @@ func init() {
 func main() {
 	c, err := pcap.OpenLive(listenInterface, 65535, true, 500)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "while opening %s: %s", listenInterface, err)
-		os.Exit(1)
+		panic("while opening "+listenInterface+": "+ err.Error())
 	}
 	defer c.Close()
 
 	if err := c.SetFilter("tcp dst port 3306"); err != nil {
-		fmt.Fprintf(os.Stderr, "while setting filter: %s", err)
-		os.Exit(1)
+		panic("while setting filter: "+ err.Error())
 	}
-
-	fmt.Fprintf(os.Stderr, "ready\n")
 
 	func() {
 		var data []byte
@@ -75,7 +64,7 @@ func main() {
 					q = q[1:]
 				}
 
-fmt.Printf("[%s] %s\n", pkt.Time.Format("15:04:05.000"), q)
+fmt.Printf("%s: %s\n", query.Id(query.Fingerprint(q)), q)
 			}
 		}
 	}()
